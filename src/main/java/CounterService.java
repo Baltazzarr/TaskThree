@@ -1,7 +1,9 @@
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -10,14 +12,21 @@ import java.util.concurrent.locks.ReentrantLock;
 public class CounterService {
 
     /**
-     * Служебная ообщая переменная для проверяемых чисел
+     * Служебный общий массив для проверяемых чисел
      */
-    protected static volatile long lastNumber = 1;
+    protected List<Long> lastNumbers = new ArrayList<>();
+
+    protected final List<Long> firstUnwrittens = new ArrayList<>();
+
+    /**
+     * Список потоков
+     */
+    protected final List<Counter> counterList = new ArrayList<>();
 
     /**
      * Максимальное число
      */
-    protected static final long maxNumber = 250000;
+    protected static final long maxNumber = 200000;
 
     public void start() {
         ReentrantLock locker = new ReentrantLock();
@@ -32,10 +41,53 @@ public class CounterService {
             System.out.println(e.getMessage());
             return;
         }
-        Counter counter1 = new Counter(1, locker);
-        Counter counter2 = new Counter(2, locker);
-        counter1.start();
-        counter2.start();
+        createCounters(4, locker);
+        Date startDate = new Date();
+        counterList.forEach(Counter::start);
+        while (isAnyAlive()) {
+        }
+        Date endDate = new Date();
+        System.out.println((endDate.getTime() - startDate.getTime()));
+        System.out.println(isRight("Result.txt"));
+    }
+
+    public boolean isAnyAlive() {
+        for (int i = 0; i < counterList.size(); i++) {
+            if (counterList.get(i).isAlive()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void createCounters(int number, ReentrantLock locker) {
+        for (int i = 0; i < number; i++) {
+            lastNumbers.add(Long.valueOf(i + 2));
+            firstUnwrittens.add(lastNumbers.get(i));
+            counterList.add(new Counter(i, locker, lastNumbers, firstUnwrittens));
+        }
+    }
+
+    public boolean isRight(String fileName) {
+        String line = "";
+        try(BufferedReader bufferedReader = new BufferedReader(new FileReader(fileName))) {
+            line = bufferedReader.readLine();
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
+        }
+        if (line == null || "".equals(line)) {
+            return false;
+        }
+        List<String> list = Arrays.asList(line.split(" "));
+        if (!list.isEmpty()) {
+            for (int i = 0; i < list.size() - 1; i++) {
+                if (Long.valueOf(list.get(i + 1)) <= Long.valueOf(list.get(i))) {
+                    System.out.println(String.format("Wrong number = %s", list.get(i + 1)));
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
 }

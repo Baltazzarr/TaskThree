@@ -19,9 +19,18 @@ public class Counter extends Thread{
      */
     protected ReentrantLock locker;
 
-    public Counter(int number, ReentrantLock locker) {
+    /**
+     * Счетчики
+     */
+    protected final List<Long> lastNumbers;
+
+    protected final List<Long> firstUnwrittens;
+
+    public Counter(int number, ReentrantLock locker, List<Long> lastNumbers, List<Long> firstUnwrittens) {
         this.number = number;
         this.locker = locker;
+        this.lastNumbers = lastNumbers;
+        this.firstUnwrittens = firstUnwrittens;
         File file = new File(String.format("Thread%d.txt", number));
         try {
             if (file.exists()) {
@@ -43,7 +52,7 @@ public class Counter extends Thread{
         if (value == 2) {
             return true;
         }
-        for (long i = 2; i <= value / 2; i++) {
+        for (long i = 2; i <= Math.sqrt(value); i++) {
             if (value % i == 0) {
                 return false;
             }
@@ -57,11 +66,24 @@ public class Counter extends Thread{
      * @param file дескриптор файла
      */
     public void writeToFile(String value, File file) {
-        try (FileWriter commonFileWriter = new FileWriter(file, true)) {
-            commonFileWriter.write(value);
+        try (FileWriter fileWriter = new FileWriter(file, true)) {
+            fileWriter.write(value);
         } catch(IOException e) {
             System.out.println(e.getMessage());
         }
+    }
+
+    public Long getMinUnwritten() {
+        Long min = null;
+        if (firstUnwrittens.size() > 1) {
+            for (int i = 0; i < firstUnwrittens.size(); i++) {
+                if (i != number && firstUnwrittens.get(i) != null && (min == null || min > firstUnwrittens.get(i))) {
+                    min = firstUnwrittens.get(i);
+                }
+
+            }
+        }
+        return min;
     }
 
     @Override
@@ -69,40 +91,51 @@ public class Counter extends Thread{
         File localFile = new File(String.format("Thread%d.txt", number));
         File commonFile = new File("Result.txt");
         boolean needToStop = false;
-        boolean needToFlush = false;
-        long value = 1;
-        String bufferVal = "";
+        boolean isFirstValue = true;
+        Long value;
         List<Long> buffer = new ArrayList<>();
+        String s = "";
         while (!needToStop) {
             locker.lock();
             try {
                 if (!buffer.isEmpty()) {
-                    if (value < CounterService.lastNumber || value >= CounterService.maxNumber) {
-                        needToFlush = true;
-                        writeToFile(bufferVal, commonFile);
+                    List<Long> tmp = new ArrayList<>();
+                    Long min = getMinUnwritten();
+                    if (min != null) {
+                        tmp = buffer.stream().filter(a -> a <= min).collect(Collectors.toList());
+                    } else {
+                        tmp.addAll(buffer);
+                    }
+                    if (!tmp.isEmpty()) {
+                        s = tmp.stream().map(String::valueOf).collect(Collectors.joining(" ")) + " ";
+                        writeToFile(s, commonFile);
+                        buffer.removeAll(tmp);
                     }
                 }
-                if (CounterService.lastNumber < CounterService.maxNumber) {
-                    CounterService.lastNumber++;
-                    value = CounterService.lastNumber;;
+                if (isFirstValue) {
+                    value = lastNumbers.get(number);
+                    isFirstValue = false;
                 } else {
-                    needToStop = true;
+                    value = lastNumbers.stream().max(Long::compareTo).get() + 1;
+                }
+                if (value > CounterService.maxNumber) {
+                    if (buffer.isEmpty()) {
+                        needToStop = true;
+                    }
+                    firstUnwrittens.set(number, buffer.isEmpty() ? null : buffer.get(0));
+                } else {
+                    lastNumbers.set(number, value);
+                    firstUnwrittens.set(number, buffer.isEmpty() ? value : buffer.get(0));
                 }
             } finally {
                 locker.unlock();
             }
-            if (needToFlush) {
-                writeToFile(bufferVal, localFile);
-                buffer.clear();
-                bufferVal = "";
-                needToFlush = false;
+            if (!"".equals(s)) {
+                writeToFile(s, localFile);
+                s = "";
             }
-            if (needToStop) {
-                break;
-            }
-            if (isPrimeNumber(value)) {
+            if (!needToStop && value <= CounterService.maxNumber && isPrimeNumber(value)) {
                 buffer.add(value);
-                bufferVal = buffer.stream().map(a -> a.toString()).collect(Collectors.joining(" ")) + " ";
             }
         }
         System.out.println(String.format("Finish Thread %d", number));
